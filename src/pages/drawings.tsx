@@ -11,7 +11,7 @@ import * as drawingsService from "@/services/drawings.service"
 import type { Drawing } from "@/lib/types"
 import { CONSTRUCTION_UNITS } from "@/lib/types"
 import {
-  Search, Upload, Eye, ChevronDown, ChevronUp, FileText, Download, RefreshCw, Loader2, FileSpreadsheet,
+  Search, Upload, Eye, ChevronDown, ChevronUp, FileText, Download, RefreshCw, Loader2, FileSpreadsheet, Pencil, Trash2, Check, X,
 } from "lucide-react"
 
 export function DrawingsPage() {
@@ -26,6 +26,8 @@ export function DrawingsPage() {
   const [newDrawing, setNewDrawing] = useState({ name: "", code: "", constructionUnit: CONSTRUCTION_UNITS[0] as string })
   const [saving, setSaving] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({ name: "", code: "", constructionUnit: "" })
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { addToast } = useToast()
   const { user } = useAuth()
@@ -83,6 +85,37 @@ export function DrawingsPage() {
     } catch {
       addToast("发布失败", "error")
       refetch()
+    }
+  }
+
+  function startEdit(drawing: Drawing) {
+    setEditingId(drawing.id)
+    setEditForm({ name: drawing.name, code: drawing.code, constructionUnit: drawing.constructionUnit || CONSTRUCTION_UNITS[0] })
+    setExpandedId(drawing.id)
+  }
+
+  async function handleSaveEdit(id: string) {
+    if (!editForm.name.trim() || !editForm.code.trim()) {
+      addToast("名称和编号不能为空", "error")
+      return
+    }
+    try {
+      await drawingsService.updateDrawing(id, { name: editForm.name, code: editForm.code, constructionUnit: editForm.constructionUnit } as Partial<Drawing>)
+      setDrawings((prev) => prev.map((d) => d.id === id ? { ...d, name: editForm.name, code: editForm.code, constructionUnit: editForm.constructionUnit as any } : d))
+      setEditingId(null)
+      addToast("图纸信息已更新", "success")
+    } catch {
+      addToast("更新失败", "error")
+    }
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await drawingsService.deleteDrawing(id)
+      setDrawings((prev) => prev.filter((d) => d.id !== id))
+      addToast("图纸已删除", "success")
+    } catch {
+      addToast("删除失败", "error")
     }
   }
 
@@ -309,6 +342,22 @@ export function DrawingsPage() {
                     <Button
                       variant="ghost"
                       size="icon"
+                      onClick={(e) => { e.stopPropagation(); startEdit(drawing) }}
+                      title="编辑"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={(e) => { e.stopPropagation(); if (confirm("确定删除此图纸？")) handleDelete(drawing.id) }}
+                      title="删除"
+                    >
+                      <Trash2 className="w-4 h-4 text-destructive" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       onClick={(e) => { e.stopPropagation(); addToast("图纸下载中...", "info") }}
                     >
                       <Download className="w-4 h-4" />
@@ -320,24 +369,60 @@ export function DrawingsPage() {
 
               {isExpanded && (
                 <div className="border-t border-border bg-secondary/30 p-4 sm:p-5 animate-fade-in">
-                  <h4 className="text-sm font-semibold text-foreground mb-3">接收人状态</h4>
-                  {drawing.recipients.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">暂无接收人，请先发布图纸</p>
+                  {editingId === drawing.id ? (
+                    <div>
+                      <h4 className="text-sm font-semibold text-foreground mb-3">编辑图纸信息</h4>
+                      <div className="grid sm:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-foreground mb-1.5">图纸名称</label>
+                          <Input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-foreground mb-1.5">图纸编号</label>
+                          <Input value={editForm.code} onChange={(e) => setEditForm({ ...editForm, code: e.target.value })} />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-foreground mb-1.5">施工单位</label>
+                          <Select
+                            value={editForm.constructionUnit}
+                            onChange={(e) => setEditForm({ ...editForm, constructionUnit: e.target.value })}
+                            options={CONSTRUCTION_UNITS.map((u) => ({ value: u, label: u }))}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-2 mt-4">
+                        <Button size="sm" onClick={() => handleSaveEdit(drawing.id)}>
+                          <Check className="w-4 h-4 mr-1" />
+                          保存
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>
+                          <X className="w-4 h-4 mr-1" />
+                          取消
+                        </Button>
+                      </div>
+                    </div>
                   ) : (
-                    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {drawing.recipients.map((r) => {
-                        const { label, variant } = recipientStatusMap[r.status]
-                        return (
-                          <div key={r.userId} className="flex items-center justify-between p-3 rounded-lg bg-card border border-border">
-                            <div>
-                              <p className="text-sm font-medium text-foreground">{r.userName}</p>
-                              <p className="text-xs text-muted-foreground">{r.department}</p>
-                              {r.viewedAt && <p className="text-xs text-muted-foreground mt-0.5">查阅: {r.viewedAt}</p>}
-                            </div>
-                            <Badge variant={variant}>{label}</Badge>
-                          </div>
-                        )
-                      })}
+                    <div>
+                      <h4 className="text-sm font-semibold text-foreground mb-3">接收人状态</h4>
+                      {drawing.recipients.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">暂无接收人，请先发布图纸</p>
+                      ) : (
+                        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {drawing.recipients.map((r) => {
+                            const { label, variant } = recipientStatusMap[r.status]
+                            return (
+                              <div key={r.userId} className="flex items-center justify-between p-3 rounded-lg bg-card border border-border">
+                                <div>
+                                  <p className="text-sm font-medium text-foreground">{r.userName}</p>
+                                  <p className="text-xs text-muted-foreground">{r.department}</p>
+                                  {r.viewedAt && <p className="text-xs text-muted-foreground mt-0.5">查阅: {r.viewedAt}</p>}
+                                </div>
+                                <Badge variant={variant}>{label}</Badge>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
