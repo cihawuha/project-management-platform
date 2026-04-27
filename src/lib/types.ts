@@ -1,6 +1,9 @@
 export const CONSTRUCTION_UNITS = ["华显", "绿筑", "一腾", "鑫宇", "煜坤"] as const
 export type ConstructionUnit = (typeof CONSTRUCTION_UNITS)[number]
 
+export const DRAWING_SPECIALTIES = ["土建", "安装", "电气", "管道", "钢结构"] as const
+export type DrawingSpecialty = (typeof DRAWING_SPECIALTIES)[number]
+
 export type UserRole = "admin" | "department_head" | "worker"
 
 export interface User {
@@ -25,6 +28,7 @@ export interface Drawing {
   hasChange: boolean
   changeVersion?: string
   constructionUnit?: ConstructionUnit
+  specialty?: DrawingSpecialty
   fileUrl?: string
 }
 
