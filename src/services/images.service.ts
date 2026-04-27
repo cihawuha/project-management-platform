@@ -16,12 +16,20 @@ export async function fetchProjectImages(): Promise<ProjectImage[]> {
   return snakeToCamel<ProjectImage[]>(data || [])
 }
 
+function fileToDataURL(file: File): Promise<string> {
+  return new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.readAsDataURL(file)
+  })
+}
+
 export async function uploadProjectImage(
   file: File,
-  metadata: { name: string; category: string; uploader: string; description: string }
+  metadata: { name: string; category: string; uploader: string; description: string; constructionUnit?: string }
 ): Promise<ProjectImage> {
   if (local.isLocal) {
-    const url = URL.createObjectURL(file)
+    const url = await fileToDataURL(file)
     return local.create({
       name: metadata.name,
       category: metadata.category,
@@ -29,6 +37,7 @@ export async function uploadProjectImage(
       uploader: metadata.uploader,
       url,
       description: metadata.description,
+      ...(metadata.constructionUnit ? { constructionUnit: metadata.constructionUnit } : {}),
     } as any)
   }
 
@@ -45,6 +54,7 @@ export async function uploadProjectImage(
     file_path: path,
     url,
     description: metadata.description,
+    ...(metadata.constructionUnit ? { construction_unit: metadata.constructionUnit } : {}),
   }
 
   const { data, error } = await supabase
