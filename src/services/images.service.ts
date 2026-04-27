@@ -1,9 +1,13 @@
 import { supabase } from "@/lib/supabase"
-import { snakeToCamel, camelToSnake } from "@/lib/case-utils"
+import { snakeToCamel } from "@/lib/case-utils"
 import type { ProjectImage } from "@/lib/types"
-import { uploadFile, deleteFile, getPublicUrl } from "./storage.service"
+import { uploadFile, deleteFile } from "./storage.service"
+import { createLocalService } from "./local-store"
+
+const local = createLocalService<ProjectImage>("local_images")
 
 export async function fetchProjectImages(): Promise<ProjectImage[]> {
+  if (local.isLocal) return local.fetchAll()
   const { data, error } = await supabase
     .from("project_images")
     .select("*")
@@ -16,6 +20,18 @@ export async function uploadProjectImage(
   file: File,
   metadata: { name: string; category: string; uploader: string; description: string }
 ): Promise<ProjectImage> {
+  if (local.isLocal) {
+    const url = URL.createObjectURL(file)
+    return local.create({
+      name: metadata.name,
+      category: metadata.category,
+      uploadDate: new Date().toISOString().split("T")[0],
+      uploader: metadata.uploader,
+      url,
+      description: metadata.description,
+    } as any)
+  }
+
   const datePrefix = new Date().toISOString().slice(0, 7)
   const filePath = `${datePrefix}/${Date.now()}_${file.name}`
 
@@ -41,6 +57,7 @@ export async function uploadProjectImage(
 }
 
 export async function deleteProjectImage(id: string, filePath: string): Promise<void> {
+  if (local.isLocal) return local.remove(id)
   await deleteFile("project-images", filePath)
   const { error } = await supabase.from("project_images").delete().eq("id", id)
   if (error) throw new Error(`删除照片失败: ${error.message}`)
