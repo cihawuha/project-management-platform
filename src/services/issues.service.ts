@@ -1,8 +1,12 @@
 import { supabase } from "@/lib/supabase"
 import { snakeToCamel, camelToSnake } from "@/lib/case-utils"
 import type { IssueRecord } from "@/lib/types"
+import { createLocalService } from "./local-store"
+
+const local = createLocalService<IssueRecord>("local_issues")
 
 export async function fetchIssues(): Promise<IssueRecord[]> {
+  if (local.isLocal) return local.fetchAll()
   const { data, error } = await supabase
     .from("issues")
     .select("*")
@@ -14,6 +18,7 @@ export async function fetchIssues(): Promise<IssueRecord[]> {
 export async function createIssue(
   issue: Omit<IssueRecord, "id">
 ): Promise<IssueRecord> {
+  if (local.isLocal) return local.create(issue)
   const row = camelToSnake(issue)
   delete row.id
   delete row.resolve_date
@@ -30,6 +35,7 @@ export async function updateIssue(
   id: string,
   updates: Partial<IssueRecord>
 ): Promise<IssueRecord> {
+  if (local.isLocal) return local.update(id, updates)
   const row = camelToSnake(updates)
   delete row.id
   const { data, error } = await supabase
