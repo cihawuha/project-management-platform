@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from "react"
 import type { User, UserRole } from "./types"
 import { signIn, signOut, fetchProfile } from "@/services/auth.service"
-import { supabase } from "@/lib/supabase"
+import { supabase, isSupabaseConfigured } from "@/lib/supabase"
 
 interface AuthContextType {
   user: User | null
@@ -20,6 +20,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const profileFetchedRef = useRef(false)
 
   useEffect(() => {
+    if (!isSupabaseConfigured) {
+      const stored = localStorage.getItem("local_user")
+      if (stored) {
+        try { setUser(JSON.parse(stored)) } catch { /* ignore */ }
+      }
+      setIsLoading(false)
+      return
+    }
+
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         try {
