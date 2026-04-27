@@ -1,8 +1,12 @@
 import { supabase } from "@/lib/supabase"
 import { snakeToCamel, camelToSnake } from "@/lib/case-utils"
 import type { MaterialPlan, MaterialItem } from "@/lib/types"
+import { createLocalService } from "./local-store"
+
+const local = createLocalService<MaterialPlan>("local_materials")
 
 export async function fetchMaterialPlans(): Promise<MaterialPlan[]> {
+  if (local.isLocal) return local.fetchAll()
   const { data, error } = await supabase
     .from("material_plans")
     .select("*, material_items(*)")
@@ -24,6 +28,11 @@ export async function createMaterialPlan(
   plan: Omit<MaterialPlan, "id">,
   materials: MaterialItem[]
 ): Promise<MaterialPlan> {
+  if (local.isLocal) {
+    const newPlan = await local.create({ ...plan, materials } as any)
+    return newPlan
+  }
+
   const row: any = camelToSnake(plan)
   delete row.id
   delete row.materials
@@ -55,6 +64,7 @@ export async function updateMaterialPlan(
   id: string,
   updates: Partial<MaterialPlan>
 ): Promise<MaterialPlan> {
+  if (local.isLocal) return local.update(id, updates)
   const row = camelToSnake(updates)
   delete row.id
   delete row.materials
