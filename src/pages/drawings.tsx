@@ -9,7 +9,7 @@ import { useAuth } from "@/lib/auth"
 import { useAsyncData } from "@/hooks/use-async-data"
 import * as drawingsService from "@/services/drawings.service"
 import type { Drawing } from "@/lib/types"
-import { CONSTRUCTION_UNITS } from "@/lib/types"
+import { CONSTRUCTION_UNITS, DRAWING_SPECIALTIES } from "@/lib/types"
 import {
   Search, Upload, Eye, ChevronDown, ChevronUp, FileText, Download, RefreshCw, Loader2, FileSpreadsheet, Pencil, Trash2, Check, X,
 } from "lucide-react"
@@ -23,12 +23,13 @@ export function DrawingsPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [showUpload, setShowUpload] = useState(false)
-  const [newDrawing, setNewDrawing] = useState({ name: "", code: "", constructionUnit: CONSTRUCTION_UNITS[0] as string })
+  const [newDrawing, setNewDrawing] = useState({ name: "", code: "", constructionUnit: CONSTRUCTION_UNITS[0] as string, specialty: DRAWING_SPECIALTIES[0] as string })
   const [saving, setSaving] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState({ name: "", code: "", constructionUnit: "" })
+  const [editForm, setEditForm] = useState({ name: "", code: "", constructionUnit: "", specialty: "" })
   const [previewDrawing, setPreviewDrawing] = useState<Drawing | null>(null)
+  const [filterSpecialty, setFilterSpecialty] = useState<string>("全部")
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { addToast } = useToast()
   const { user } = useAuth()
@@ -39,8 +40,9 @@ export function DrawingsPage() {
 
   const filtered = drawings.filter(
     (d) =>
-      d.name.includes(searchQuery) ||
-      d.code.toLowerCase().includes(searchQuery.toLowerCase())
+      (filterSpecialty === "全部" || d.specialty === filterSpecialty) &&
+      (d.name.includes(searchQuery) ||
+      d.code.toLowerCase().includes(searchQuery.toLowerCase()))
   )
 
   async function handleUpload() {
@@ -61,11 +63,12 @@ export function DrawingsPage() {
           fileSize: selectedFile ? `${(selectedFile.size / 1024 / 1024).toFixed(1)} MB` : "0 MB",
           hasChange: false,
           constructionUnit: newDrawing.constructionUnit,
+          specialty: newDrawing.specialty,
         },
         selectedFile || undefined
       )
       setDrawings((prev) => [nd, ...prev])
-      setNewDrawing({ name: "", code: "", constructionUnit: CONSTRUCTION_UNITS[0] })
+      setNewDrawing({ name: "", code: "", constructionUnit: CONSTRUCTION_UNITS[0], specialty: DRAWING_SPECIALTIES[0] })
       setSelectedFile(null)
       setShowUpload(false)
       addToast("图纸上传成功", "success")
@@ -91,7 +94,7 @@ export function DrawingsPage() {
 
   function startEdit(drawing: Drawing) {
     setEditingId(drawing.id)
-    setEditForm({ name: drawing.name, code: drawing.code, constructionUnit: drawing.constructionUnit || CONSTRUCTION_UNITS[0] })
+    setEditForm({ name: drawing.name, code: drawing.code, constructionUnit: drawing.constructionUnit || CONSTRUCTION_UNITS[0], specialty: drawing.specialty || DRAWING_SPECIALTIES[0] })
     setExpandedId(drawing.id)
   }
 
@@ -101,8 +104,8 @@ export function DrawingsPage() {
       return
     }
     try {
-      await drawingsService.updateDrawing(id, { name: editForm.name, code: editForm.code, constructionUnit: editForm.constructionUnit } as Partial<Drawing>)
-      setDrawings((prev) => prev.map((d) => d.id === id ? { ...d, name: editForm.name, code: editForm.code, constructionUnit: editForm.constructionUnit as any } : d))
+      await drawingsService.updateDrawing(id, { name: editForm.name, code: editForm.code, constructionUnit: editForm.constructionUnit, specialty: editForm.specialty } as Partial<Drawing>)
+      setDrawings((prev) => prev.map((d) => d.id === id ? { ...d, name: editForm.name, code: editForm.code, constructionUnit: editForm.constructionUnit as any, specialty: editForm.specialty as any } : d))
       setEditingId(null)
       addToast("图纸信息已更新", "success")
     } catch {
@@ -244,7 +247,7 @@ export function DrawingsPage() {
                 </>
               )}
             </div>
-            <div className="grid sm:grid-cols-3 gap-4 mt-4">
+            <div className="grid sm:grid-cols-4 gap-4 mt-4">
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1.5">图纸名称</label>
                 <Input
@@ -259,6 +262,14 @@ export function DrawingsPage() {
                   value={newDrawing.code}
                   onChange={(e) => setNewDrawing({ ...newDrawing, code: e.target.value })}
                   placeholder="选择文件后自动识别"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1.5">专业</label>
+                <Select
+                  value={newDrawing.specialty}
+                  onChange={(e) => setNewDrawing({ ...newDrawing, specialty: e.target.value })}
+                  options={DRAWING_SPECIALTIES.map((s) => ({ value: s, label: s }))}
                 />
               </div>
               <div>
@@ -281,14 +292,31 @@ export function DrawingsPage() {
         </Card>
       )}
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="搜索图纸名称或编号..."
-          className="pl-10"
-        />
+      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+        <div className="relative max-w-md flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="搜索图纸名称或编号..."
+            className="pl-10"
+          />
+        </div>
+        <div className="flex gap-1.5 flex-wrap">
+          {["全部", ...DRAWING_SPECIALTIES].map((s) => (
+            <button
+              key={s}
+              onClick={() => setFilterSpecialty(s)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-normal ${
+                filterSpecialty === s
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-card text-muted-foreground border-border hover:bg-accent/50"
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="space-y-3">
@@ -308,6 +336,9 @@ export function DrawingsPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-sm font-semibold text-foreground">{drawing.name}</h3>
                       <Badge variant={statusVariant}>{statusLabel}</Badge>
+                      {drawing.specialty && (
+                        <Badge variant="info">{drawing.specialty}</Badge>
+                      )}
                       {drawing.constructionUnit && (
                         <Badge variant="outline">{drawing.constructionUnit}</Badge>
                       )}
@@ -383,7 +414,7 @@ export function DrawingsPage() {
                   {editingId === drawing.id ? (
                     <div>
                       <h4 className="text-sm font-semibold text-foreground mb-3">编辑图纸信息</h4>
-                      <div className="grid sm:grid-cols-3 gap-4">
+                      <div className="grid sm:grid-cols-4 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-foreground mb-1.5">图纸名称</label>
                           <Input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
@@ -391,6 +422,14 @@ export function DrawingsPage() {
                         <div>
                           <label className="block text-sm font-medium text-foreground mb-1.5">图纸编号</label>
                           <Input value={editForm.code} onChange={(e) => setEditForm({ ...editForm, code: e.target.value })} />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-foreground mb-1.5">专业</label>
+                          <Select
+                            value={editForm.specialty}
+                            onChange={(e) => setEditForm({ ...editForm, specialty: e.target.value })}
+                            options={DRAWING_SPECIALTIES.map((s) => ({ value: s, label: s }))}
+                          />
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-foreground mb-1.5">施工单位</label>
