@@ -125,7 +125,32 @@ export function DrawingsPage() {
         type="file"
         accept=".pdf,.dwg,.dxf"
         className="hidden"
-        onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+        onChange={(e) => {
+          const file = e.target.files?.[0] || null
+          setSelectedFile(file)
+          if (file) {
+            const baseName = file.name.replace(/\.[^.]+$/, "")
+            // Try to split by common delimiters: _ - space
+            const parts = baseName.split(/[_\-\s]+/)
+            // Code pattern: contains letters and numbers (e.g. PIP-001-A, DWG001)
+            const codeParts: string[] = []
+            const nameParts: string[] = []
+            for (const p of parts) {
+              if (/[A-Za-z]/.test(p) && /[0-9]/.test(p)) {
+                codeParts.push(p)
+              } else {
+                nameParts.push(p)
+              }
+            }
+            const autoCode = codeParts.join("-") || ""
+            const autoName = nameParts.join("") || baseName
+            setNewDrawing((prev) => ({
+              ...prev,
+              name: prev.name || autoName,
+              code: prev.code || autoCode,
+            }))
+          }
+        }}
       />
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -145,13 +170,27 @@ export function DrawingsPage() {
             <CardTitle className="text-base">上传新图纸</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid sm:grid-cols-3 gap-4">
+            <div
+              className="p-6 border-2 border-dashed border-border rounded-lg text-center cursor-pointer hover:bg-accent/30 transition-normal"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <FileText className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+              {selectedFile ? (
+                <p className="text-sm text-foreground font-medium">{selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(1)} MB)</p>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">点击选择文件上传（自动识别图纸名称及编号）</p>
+                  <p className="text-xs text-muted-foreground mt-1">支持 PDF、DWG、DXF 格式</p>
+                </>
+              )}
+            </div>
+            <div className="grid sm:grid-cols-3 gap-4 mt-4">
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1.5">图纸名称</label>
                 <Input
                   value={newDrawing.name}
                   onChange={(e) => setNewDrawing({ ...newDrawing, name: e.target.value })}
-                  placeholder="例：主装置区管道布置图"
+                  placeholder="选择文件后自动识别"
                 />
               </div>
               <div>
@@ -159,7 +198,7 @@ export function DrawingsPage() {
                 <Input
                   value={newDrawing.code}
                   onChange={(e) => setNewDrawing({ ...newDrawing, code: e.target.value })}
-                  placeholder="例：PIP-001-A"
+                  placeholder="选择文件后自动识别"
                 />
               </div>
               <div>
@@ -170,20 +209,6 @@ export function DrawingsPage() {
                   options={CONSTRUCTION_UNITS.map((u) => ({ value: u, label: u }))}
                 />
               </div>
-            </div>
-            <div
-              className="mt-4 p-6 border-2 border-dashed border-border rounded-lg text-center cursor-pointer hover:bg-accent/30 transition-normal"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <FileText className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-              {selectedFile ? (
-                <p className="text-sm text-foreground font-medium">{selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(1)} MB)</p>
-              ) : (
-                <>
-                  <p className="text-sm text-muted-foreground">点击选择文件上传</p>
-                  <p className="text-xs text-muted-foreground mt-1">支持 PDF、DWG、DXF 格式</p>
-                </>
-              )}
             </div>
             <div className="flex gap-3 mt-4">
               <Button onClick={handleUpload} disabled={saving}>
