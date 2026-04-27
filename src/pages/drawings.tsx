@@ -28,6 +28,7 @@ export function DrawingsPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState({ name: "", code: "", constructionUnit: "" })
+  const [previewDrawing, setPreviewDrawing] = useState<Drawing | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { addToast } = useToast()
   const { user } = useAuth()
@@ -339,6 +340,16 @@ export function DrawingsPage() {
                         发布
                       </Button>
                     )}
+                    {drawing.fileUrl && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => { e.stopPropagation(); setPreviewDrawing(drawing) }}
+                        title="预览"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon"
@@ -438,6 +449,40 @@ export function DrawingsPage() {
           </div>
         )}
       </div>
+
+      {/* 预览弹窗 */}
+      {previewDrawing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setPreviewDrawing(null)}>
+          <div className="bg-card rounded-lg shadow-xl w-[90vw] h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">{previewDrawing.name}</h3>
+                <p className="text-xs text-muted-foreground">编号: {previewDrawing.code}</p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setPreviewDrawing(null)}>
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+            <div className="flex-1 min-h-0">
+              {previewDrawing.fileUrl?.startsWith("data:application/pdf") || previewDrawing.fileUrl?.endsWith(".pdf") ? (
+                <iframe src={previewDrawing.fileUrl} className="w-full h-full border-0" title="图纸预览" />
+              ) : previewDrawing.fileUrl?.startsWith("data:image") ? (
+                <div className="w-full h-full flex items-center justify-center p-4 overflow-auto">
+                  <img src={previewDrawing.fileUrl} alt={previewDrawing.name} className="max-w-full max-h-full object-contain" />
+                </div>
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <div className="text-center text-muted-foreground">
+                    <FileText className="w-16 h-16 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">该文件格式暂不支持在线预览</p>
+                    <p className="text-xs mt-1">支持 PDF 和图片格式的在线预览</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
