@@ -1,8 +1,12 @@
 import { supabase } from "@/lib/supabase"
 import { snakeToCamel, camelToSnake } from "@/lib/case-utils"
 import type { Milestone } from "@/lib/types"
+import { createLocalService } from "./local-store"
+
+const local = createLocalService<Milestone>("local_milestones")
 
 export async function fetchMilestones(): Promise<Milestone[]> {
+  if (local.isLocal) return local.fetchAll()
   const { data, error } = await supabase
     .from("milestones")
     .select("*")
@@ -14,6 +18,7 @@ export async function fetchMilestones(): Promise<Milestone[]> {
 export async function createMilestone(
   milestone: Omit<Milestone, "id">
 ): Promise<Milestone> {
+  if (local.isLocal) return local.create(milestone)
   const row = camelToSnake(milestone)
   delete row.id
   const { data, error } = await supabase
@@ -29,6 +34,7 @@ export async function updateMilestone(
   id: string,
   updates: Partial<Milestone>
 ): Promise<Milestone> {
+  if (local.isLocal) return local.update(id, updates)
   const row = camelToSnake(updates)
   delete row.id
   const { data, error } = await supabase
@@ -42,6 +48,7 @@ export async function updateMilestone(
 }
 
 export async function deleteMilestone(id: string): Promise<void> {
+  if (local.isLocal) return local.remove(id)
   const { error } = await supabase.from("milestones").delete().eq("id", id)
   if (error) throw new Error(`删除里程碑失败: ${error.message}`)
 }
