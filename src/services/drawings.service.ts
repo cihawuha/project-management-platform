@@ -31,10 +31,19 @@ export async function createDrawing(
   file?: File
 ): Promise<Drawing> {
   if (local.isLocal) {
+    let fileUrl: string | undefined
+    if (file) {
+      fileUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.readAsDataURL(file)
+      })
+    }
     const newDrawing = await local.create({
       ...drawing,
       recipients: [],
       fileSize: file ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : drawing.fileSize || "0 MB",
+      fileUrl,
     } as any)
     ;(newDrawing as any).recipients = (newDrawing as any).recipients || []
     return newDrawing
