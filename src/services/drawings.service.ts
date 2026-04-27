@@ -2,8 +2,13 @@ import { supabase } from "@/lib/supabase"
 import { snakeToCamel, camelToSnake } from "@/lib/case-utils"
 import type { Drawing, DrawingRecipient } from "@/lib/types"
 import { uploadFile } from "./storage.service"
+import { createLocalService } from "./local-store"
+
+const local = createLocalService<Drawing>("local_drawings")
 
 export async function fetchDrawings(): Promise<Drawing[]> {
+  if (local.isLocal) return local.fetchAll()
+
   const { data, error } = await supabase
     .from("drawings")
     .select("*, drawing_recipients(*)")
@@ -25,6 +30,16 @@ export async function createDrawing(
   drawing: Omit<Drawing, "id" | "recipients">,
   file?: File
 ): Promise<Drawing> {
+  if (local.isLocal) {
+    const newDrawing = await local.create({
+      ...drawing,
+      recipients: [],
+      fileSize: file ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : drawing.fileSize || "0 MB",
+    } as any)
+    ;(newDrawing as any).recipients = (newDrawing as any).recipients || []
+    return newDrawing
+  }
+
   let filePath: string | undefined
   let fileSize: string | undefined
 
@@ -57,6 +72,8 @@ export async function updateDrawing(
   id: string,
   updates: Partial<Drawing>
 ): Promise<Drawing> {
+  if (local.isLocal) return local.update(id, updates)
+
   const row = camelToSnake(updates)
   delete row.id
   delete row.recipients
@@ -72,6 +89,7 @@ export async function updateDrawing(
 }
 
 export async function deleteDrawing(id: string): Promise<void> {
+  if (local.isLocal) return local.remove(id)
   const { error } = await supabase.from("drawings").delete().eq("id", id)
   if (error) throw new Error(`删除图纸失败: ${error.message}`)
 }
