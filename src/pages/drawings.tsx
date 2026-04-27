@@ -11,7 +11,7 @@ import * as drawingsService from "@/services/drawings.service"
 import type { Drawing } from "@/lib/types"
 import { CONSTRUCTION_UNITS } from "@/lib/types"
 import {
-  Search, Upload, Eye, ChevronDown, ChevronUp, FileText, Download, RefreshCw, Loader2,
+  Search, Upload, Eye, ChevronDown, ChevronUp, FileText, Download, RefreshCw, Loader2, FileSpreadsheet,
 } from "lucide-react"
 
 export function DrawingsPage() {
@@ -86,6 +86,48 @@ export function DrawingsPage() {
     }
   }
 
+  function handleExportCatalog() {
+    if (filtered.length === 0) {
+      addToast("暂无图纸数据可导出", "error")
+      return
+    }
+    const header = "序号,图纸编号,图纸名称,版本,状态,施工单位,上传人,上传日期,文件大小\n"
+    const rows = filtered.map((d, i) => {
+      const status = statusMap[d.status]?.label || d.status
+      const unit = d.constructionUnit || ""
+      return `${i + 1},${d.code},${d.name},${d.version},${status},${unit},${d.uploader},${d.uploadDate},${d.fileSize}`
+    }).join("\n")
+    const blob = new Blob(["\ufeff" + header + rows], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    link.href = URL.createObjectURL(blob)
+    link.download = `图纸目录_${new Date().toISOString().split("T")[0]}.csv`
+    link.click()
+    URL.revokeObjectURL(link.href)
+    addToast("图纸目录导出成功", "success")
+  }
+
+  function handleFileSelect(file: File) {
+    setSelectedFile(file)
+    const baseName = file.name.replace(/\.[^.]+$/, "")
+    const parts = baseName.split(/[_\-\s]+/)
+    const codeParts: string[] = []
+    const nameParts: string[] = []
+    for (const p of parts) {
+      if (/[A-Za-z]/.test(p) && /[0-9]/.test(p)) {
+        codeParts.push(p)
+      } else {
+        nameParts.push(p)
+      }
+    }
+    const autoCode = codeParts.join("-") || ""
+    const autoName = nameParts.join("") || baseName
+    setNewDrawing((prev) => ({
+      ...prev,
+      name: autoName,
+      code: autoCode,
+    }))
+  }
+
   const statusMap = {
     published: { label: "已发布", variant: "success" as const },
     reviewing: { label: "审核中", variant: "warning" as const },
@@ -126,30 +168,8 @@ export function DrawingsPage() {
         accept=".pdf,.dwg,.dxf"
         className="hidden"
         onChange={(e) => {
-          const file = e.target.files?.[0] || null
-          setSelectedFile(file)
-          if (file) {
-            const baseName = file.name.replace(/\.[^.]+$/, "")
-            // Try to split by common delimiters: _ - space
-            const parts = baseName.split(/[_\-\s]+/)
-            // Code pattern: contains letters and numbers (e.g. PIP-001-A, DWG001)
-            const codeParts: string[] = []
-            const nameParts: string[] = []
-            for (const p of parts) {
-              if (/[A-Za-z]/.test(p) && /[0-9]/.test(p)) {
-                codeParts.push(p)
-              } else {
-                nameParts.push(p)
-              }
-            }
-            const autoCode = codeParts.join("-") || ""
-            const autoName = nameParts.join("") || baseName
-            setNewDrawing((prev) => ({
-              ...prev,
-              name: prev.name || autoName,
-              code: prev.code || autoCode,
-            }))
-          }
+          const file = e.target.files?.[0]
+          if (file) handleFileSelect(file)
         }}
       />
 
@@ -158,10 +178,16 @@ export function DrawingsPage() {
           <h1 className="text-2xl font-bold text-foreground">图纸发布管理</h1>
           <p className="text-sm text-muted-foreground mt-1">管理项目图纸的上传、分发与查阅状态</p>
         </div>
-        <Button onClick={() => setShowUpload(!showUpload)}>
-          <Upload className="w-4 h-4 mr-2" />
-          上传图纸
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleExportCatalog}>
+            <FileSpreadsheet className="w-4 h-4 mr-2" />
+            导出图纸目录
+          </Button>
+          <Button onClick={() => setShowUpload(!showUpload)}>
+            <Upload className="w-4 h-4 mr-2" />
+            上传图纸
+          </Button>
+        </div>
       </div>
 
       {showUpload && (
