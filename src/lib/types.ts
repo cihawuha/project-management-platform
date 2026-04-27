@@ -25,6 +25,7 @@ export interface Drawing {
   hasChange: boolean
   changeVersion?: string
   constructionUnit?: ConstructionUnit
+  fileUrl?: string
 }
 
 export interface DrawingRecipient {
