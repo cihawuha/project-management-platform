@@ -6,8 +6,8 @@ import { Input } from "@/components/ui/input"
 import { HardHat, Eye, EyeOff, Loader2 } from "lucide-react"
 
 export function LoginPage() {
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
+  const [email, setEmail] = useState("nxtx")
+  const [password, setPassword] = useState("123456")
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
@@ -18,7 +18,7 @@ export function LoginPage() {
     e.preventDefault()
     setError("")
     if (!email.trim()) {
-      setError("请输入邮箱")
+      setError("请输入账号")
       return
     }
     if (!password.trim()) {
@@ -31,7 +31,7 @@ export function LoginPage() {
       if (success) {
         addToast("登录成功", "success")
       } else {
-        setError("邮箱或密码错误")
+        setError("账号或密码错误")
       }
     } catch {
       setError("网络连接失败，请稍后重试")
@@ -82,12 +82,12 @@ export function LoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">邮箱</label>
+              <label className="block text-sm font-medium text-foreground mb-1.5">账号</label>
               <Input
-                type="email"
+                type="text"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="请输入邮箱"
+                placeholder="请输入账号"
                 autoFocus
                 disabled={isLoading}
               />
