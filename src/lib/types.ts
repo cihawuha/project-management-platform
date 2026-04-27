@@ -1,4 +1,4 @@
-export const CONSTRUCTION_UNITS = ["绿筑", "华显", "一腾"] as const
+export const CONSTRUCTION_UNITS = ["华显", "绿筑", "一腾", "鑫宇", "煜坤"] as const
 export type ConstructionUnit = (typeof CONSTRUCTION_UNITS)[number]
 
 export type UserRole = "admin" | "department_head" | "worker"
