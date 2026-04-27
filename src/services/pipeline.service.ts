@@ -2,6 +2,9 @@ import { supabase } from "@/lib/supabase"
 import { snakeToCamel, camelToSnake } from "@/lib/case-utils"
 import type { PipelineInspection } from "@/lib/types"
 import { uploadFile } from "./storage.service"
+import { createLocalService } from "./local-store"
+
+const local = createLocalService<PipelineInspection>("local_pipeline")
 
 const CATEGORY_MAP: Record<string, string> = {
   preAssembly: "pre_assembly",
@@ -36,7 +39,11 @@ function assemblePhotos(photoRows: any[]): PipelineInspection["photos"] {
   return photos
 }
 
+const emptyPhotos = () => ({ preAssembly: [], rootPass: [], capPass: [], weldingMaterial: [], process: [] })
+
 export async function fetchInspections(): Promise<PipelineInspection[]> {
+  if (local.isLocal) return local.fetchAll()
+
   const { data, error } = await supabase
     .from("pipeline_inspections")
     .select("*, inspection_photos(*)")
@@ -55,6 +62,11 @@ export async function fetchInspections(): Promise<PipelineInspection[]> {
 export async function createInspection(
   inspection: Omit<PipelineInspection, "id" | "photos">
 ): Promise<PipelineInspection> {
+  if (local.isLocal) {
+    const newItem = await local.create({ ...inspection, photos: emptyPhotos() } as any)
+    return newItem
+  }
+
   const row: any = camelToSnake(inspection)
   delete row.id
   delete row.photos
@@ -68,13 +80,7 @@ export async function createInspection(
   if (error) throw new Error(`创建检查记录失败: ${error.message}`)
 
   const result = snakeToCamel<PipelineInspection>(data)
-  ;(result as any).photos = {
-    preAssembly: [],
-    rootPass: [],
-    capPass: [],
-    weldingMaterial: [],
-    process: [],
-  }
+  ;(result as any).photos = emptyPhotos()
   return result
 }
 
@@ -83,6 +89,17 @@ export async function uploadInspectionPhoto(
   category: keyof PipelineInspection["photos"],
   file: File
 ): Promise<string> {
+  if (local.isLocal) {
+    const url = URL.createObjectURL(file)
+    const items = await local.fetchAll()
+    const item = items.find((i) => i.id === inspectionId)
+    if (item) {
+      ;(item.photos as any)[category].push(url)
+      await local.update(inspectionId, { photos: item.photos } as any)
+    }
+    return url
+  }
+
   const dbCategory = CATEGORY_MAP[category] || category
   const filePath = `${inspectionId}/${dbCategory}/${Date.now()}_${file.name}`
 
@@ -103,6 +120,10 @@ export async function updateInspectionStatus(
   id: string,
   status: PipelineInspection["status"]
 ): Promise<void> {
+  if (local.isLocal) {
+    await local.update(id, { status } as any)
+    return
+  }
   const { error } = await supabase
     .from("pipeline_inspections")
     .update({ status })
