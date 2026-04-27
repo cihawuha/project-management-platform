@@ -129,14 +129,7 @@ export function LoginPage() {
             </Button>
           </form>
 
-          <div className="mt-8 p-4 rounded-lg bg-secondary/50 border border-border">
-            <p className="text-xs text-muted-foreground mb-2">测试账号：</p>
-            <div className="space-y-1 text-xs text-muted-foreground">
-              <p><span className="font-medium text-foreground">admin@nxtx.local</span> / admin123 — 管理员（张建国）</p>
-              <p><span className="font-medium text-foreground">lmh@nxtx.local</span> / lmh123 — 部门负责人（李明辉）</p>
-              <p><span className="font-medium text-foreground">wdl@nxtx.local</span> / wdl123 — 施工人员（王大力）</p>
-            </div>
-          </div>
+
         </div>
       </div>
     </div>
