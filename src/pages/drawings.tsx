@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -10,9 +10,53 @@ import { useAsyncData } from "@/hooks/use-async-data"
 import * as drawingsService from "@/services/drawings.service"
 import type { Drawing } from "@/lib/types"
 import { CONSTRUCTION_UNITS, DRAWING_SPECIALTIES } from "@/lib/types"
+import type { DrawingSpecialty } from "@/lib/types"
 import {
   Search, Upload, Eye, ChevronDown, ChevronUp, FileText, Download, RefreshCw, Loader2, FileSpreadsheet, Pencil, Trash2, Check, X,
 } from "lucide-react"
+
+/** 根据文件名关键字自动识别专业分类 */
+function guessSpecialty(fileName: string): DrawingSpecialty {
+  const lower = fileName.toLowerCase()
+  const rules: [RegExp, DrawingSpecialty][] = [
+    [/电气|elec|配电|照明|弱电|强电|防雷|接地/, "电气"],
+    [/管道|给排水|暖通|通风|空调|hvac|消防水/, "管道"],
+    [/钢[结構构]|钢构|steel/, "钢结构"],
+    [/安装|设备|机电|消防|install/, "安装"],
+    [/土建|建筑|结构|基础|混凝|civil|arch|struct|桩基|地基|模板|砌体/, "土建"],
+  ]
+  for (const [re, specialty] of rules) {
+    if (re.test(lower)) return specialty
+  }
+  return "土建"
+}
+
+/** 从文件名解析图纸名称和编号 */
+function parseFileName(fileName: string) {
+  const baseName = fileName.replace(/\.[^.]+$/, "")
+  const parts = baseName.split(/[_\-\s]+/)
+  const codeParts: string[] = []
+  const nameParts: string[] = []
+  for (const p of parts) {
+    if (/[A-Za-z]/.test(p) && /[0-9]/.test(p)) {
+      codeParts.push(p)
+    } else {
+      nameParts.push(p)
+    }
+  }
+  return {
+    code: codeParts.join("-") || "",
+    name: nameParts.join("") || baseName,
+  }
+}
+
+interface BatchFileItem {
+  file: File
+  name: string
+  code: string
+  specialty: string
+  status: "pending" | "uploading" | "done" | "error"
+}
 
 export function DrawingsPage() {
   const { data: fetched, loading, error, refetch } = useAsyncData(
@@ -23,9 +67,11 @@ export function DrawingsPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [showUpload, setShowUpload] = useState(false)
-  const [newDrawing, setNewDrawing] = useState({ name: "", code: "", constructionUnit: CONSTRUCTION_UNITS[0] as string, specialty: DRAWING_SPECIALTIES[0] as string })
+  const [batchFiles, setBatchFiles] = useState<BatchFileItem[]>([])
+  const [batchUnit, setBatchUnit] = useState<string>(CONSTRUCTION_UNITS[0])
   const [saving, setSaving] = useState(false)
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 })
+  const [dragOver, setDragOver] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState({ name: "", code: "", constructionUnit: "", specialty: "" })
   const [previewDrawing, setPreviewDrawing] = useState<Drawing | null>(null)
@@ -45,39 +91,88 @@ export function DrawingsPage() {
       d.code.toLowerCase().includes(searchQuery.toLowerCase()))
   )
 
-  async function handleUpload() {
-    if (!newDrawing.name.trim() || !newDrawing.code.trim()) {
-      addToast("请填写图纸名称和编号", "error")
+  /** 将选中的文件加入批量列表，自动解析名称/编号/专业 */
+  const addFilesToBatch = useCallback((files: File[]) => {
+    const validExts = [".pdf", ".dwg", ".dxf", ".png", ".jpg", ".jpeg"]
+    const validFiles = files.filter((f) => {
+      const ext = f.name.slice(f.name.lastIndexOf(".")).toLowerCase()
+      return validExts.includes(ext)
+    })
+    if (validFiles.length === 0) {
+      addToast("请选择支持的文件格式（PDF/DWG/DXF/图片）", "error")
+      return
+    }
+    const items: BatchFileItem[] = validFiles.map((file) => {
+      const parsed = parseFileName(file.name)
+      return {
+        file,
+        name: parsed.name,
+        code: parsed.code,
+        specialty: guessSpecialty(file.name),
+        status: "pending" as const,
+      }
+    })
+    setBatchFiles((prev) => [...prev, ...items])
+    if (!showUpload) setShowUpload(true)
+  }, [addToast, showUpload])
+
+  /** 批量上传所有文件 */
+  async function handleBatchUpload() {
+    const pending = batchFiles.filter((f) => f.status === "pending")
+    if (pending.length === 0) {
+      addToast("没有待上传的图纸", "error")
       return
     }
     setSaving(true)
-    try {
-      const nd = await drawingsService.createDrawing(
-        {
-          name: newDrawing.name,
-          code: newDrawing.code,
-          version: "Rev.A",
-          uploadDate: new Date().toISOString().split("T")[0],
-          uploader: user?.name || "当前用户",
-          status: "draft",
-          fileSize: selectedFile ? `${(selectedFile.size / 1024 / 1024).toFixed(1)} MB` : "0 MB",
-          hasChange: false,
-          constructionUnit: newDrawing.constructionUnit,
-          specialty: newDrawing.specialty,
-        },
-        selectedFile || undefined
-      )
-      setDrawings((prev) => [nd, ...prev])
-      setNewDrawing({ name: "", code: "", constructionUnit: CONSTRUCTION_UNITS[0], specialty: DRAWING_SPECIALTIES[0] })
-      setSelectedFile(null)
-      setShowUpload(false)
-      addToast("图纸上传成功", "success")
-    } catch {
-      addToast("上传失败，请重试", "error")
-    } finally {
-      setSaving(false)
+    setBatchProgress({ current: 0, total: pending.length })
+    let successCount = 0
+    let failCount = 0
+
+    for (let i = 0; i < batchFiles.length; i++) {
+      const item = batchFiles[i]
+      if (item.status !== "pending") continue
+      setBatchFiles((prev) => prev.map((f, idx) => idx === i ? { ...f, status: "uploading" } : f))
+      setBatchProgress((prev) => ({ ...prev, current: prev.current + 1 }))
+      try {
+        const nd = await drawingsService.createDrawing(
+          {
+            name: item.name,
+            code: item.code,
+            version: "Rev.A",
+            uploadDate: new Date().toISOString().split("T")[0],
+            uploader: user?.name || "当前用户",
+            status: "draft",
+            fileSize: `${(item.file.size / 1024 / 1024).toFixed(1)} MB`,
+            hasChange: false,
+            constructionUnit: batchUnit,
+            specialty: item.specialty,
+          },
+          item.file
+        )
+        setDrawings((prev) => [nd, ...prev])
+        setBatchFiles((prev) => prev.map((f, idx) => idx === i ? { ...f, status: "done" } : f))
+        successCount++
+      } catch {
+        setBatchFiles((prev) => prev.map((f, idx) => idx === i ? { ...f, status: "error" } : f))
+        failCount++
+      }
     }
+
+    setSaving(false)
+    setBatchProgress({ current: 0, total: 0 })
+    if (successCount > 0) addToast(`成功上传 ${successCount} 份图纸`, "success")
+    if (failCount > 0) addToast(`${failCount} 份图纸上传失败`, "error")
+    // 清除已完成的项
+    setBatchFiles((prev) => prev.filter((f) => f.status !== "done"))
   }
+
+  const handleDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); setDragOver(true) }, [])
+  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); setDragOver(false) }, [])
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    addFilesToBatch(Array.from(e.dataTransfer.files))
+  }, [addFilesToBatch])
 
   async function handlePublish(id: string) {
     setDrawings((prev) =>
@@ -128,11 +223,12 @@ export function DrawingsPage() {
       addToast("暂无图纸数据可导出", "error")
       return
     }
-    const header = "序号,图纸编号,图纸名称,版本,状态,施工单位,上传人,上传日期,文件大小\n"
+    const header = "序号,图纸编号,图纸名称,版本,状态,专业,施工单位,上传人,上传日期,文件大小\n"
     const rows = filtered.map((d, i) => {
       const status = statusMap[d.status]?.label || d.status
       const unit = d.constructionUnit || ""
-      return `${i + 1},${d.code},${d.name},${d.version},${status},${unit},${d.uploader},${d.uploadDate},${d.fileSize}`
+      const sp = d.specialty || ""
+      return `${i + 1},${d.code},${d.name},${d.version},${status},${sp},${unit},${d.uploader},${d.uploadDate},${d.fileSize}`
     }).join("\n")
     const blob = new Blob(["\ufeff" + header + rows], { type: "text/csv;charset=utf-8;" })
     const link = document.createElement("a")
@@ -141,28 +237,6 @@ export function DrawingsPage() {
     link.click()
     URL.revokeObjectURL(link.href)
     addToast("图纸目录导出成功", "success")
-  }
-
-  function handleFileSelect(file: File) {
-    setSelectedFile(file)
-    const baseName = file.name.replace(/\.[^.]+$/, "")
-    const parts = baseName.split(/[_\-\s]+/)
-    const codeParts: string[] = []
-    const nameParts: string[] = []
-    for (const p of parts) {
-      if (/[A-Za-z]/.test(p) && /[0-9]/.test(p)) {
-        codeParts.push(p)
-      } else {
-        nameParts.push(p)
-      }
-    }
-    const autoCode = codeParts.join("-") || ""
-    const autoName = nameParts.join("") || baseName
-    setNewDrawing((prev) => ({
-      ...prev,
-      name: autoName,
-      code: autoCode,
-    }))
   }
 
   const statusMap = {
@@ -202,18 +276,22 @@ export function DrawingsPage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".pdf,.dwg,.dxf"
+        accept=".pdf,.dwg,.dxf,.png,.jpg,.jpeg"
+        multiple
         className="hidden"
         onChange={(e) => {
-          const file = e.target.files?.[0]
-          if (file) handleFileSelect(file)
+          const files = e.target.files
+          if (files && files.length > 0) {
+            addFilesToBatch(Array.from(files))
+          }
+          if (fileInputRef.current) fileInputRef.current.value = ""
         }}
       />
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">图纸发布管理</h1>
-          <p className="text-sm text-muted-foreground mt-1">管理项目图纸的上传、分发与查阅状态</p>
+          <p className="text-sm text-muted-foreground mt-1">管理项目图纸的上传、分发与查阅状态（支持批量上传自动分类）</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleExportCatalog}>
@@ -222,7 +300,7 @@ export function DrawingsPage() {
           </Button>
           <Button onClick={() => setShowUpload(!showUpload)}>
             <Upload className="w-4 h-4 mr-2" />
-            上传图纸
+            批量上传
           </Button>
         </div>
       </div>
@@ -230,63 +308,155 @@ export function DrawingsPage() {
       {showUpload && (
         <Card className="animate-scale-in">
           <CardHeader>
-            <CardTitle className="text-base">上传新图纸</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div
-              className="p-6 border-2 border-dashed border-border rounded-lg text-center cursor-pointer hover:bg-accent/30 transition-normal"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <FileText className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-              {selectedFile ? (
-                <p className="text-sm text-foreground font-medium">{selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(1)} MB)</p>
-              ) : (
-                <>
-                  <p className="text-sm text-muted-foreground">点击选择文件上传（自动识别图纸名称及编号）</p>
-                  <p className="text-xs text-muted-foreground mt-1">支持 PDF、DWG、DXF 格式</p>
-                </>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">批量上传图纸</CardTitle>
+              {batchFiles.length > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  共 {batchFiles.length} 份图纸，{batchFiles.filter((f) => f.status === "pending").length} 份待上传
+                </span>
               )}
             </div>
-            <div className="grid sm:grid-cols-4 gap-4 mt-4">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1.5">图纸名称</label>
-                <Input
-                  value={newDrawing.name}
-                  onChange={(e) => setNewDrawing({ ...newDrawing, name: e.target.value })}
-                  placeholder="选择文件后自动识别"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1.5">图纸编号</label>
-                <Input
-                  value={newDrawing.code}
-                  onChange={(e) => setNewDrawing({ ...newDrawing, code: e.target.value })}
-                  placeholder="选择文件后自动识别"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1.5">专业</label>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* 拖拽区 */}
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`p-6 border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors ${
+                dragOver ? "border-primary bg-primary/5" : "border-border hover:bg-accent/30"
+              }`}
+              onClick={() => !saving && fileInputRef.current?.click()}
+            >
+              {saving ? (
+                <div className="space-y-3">
+                  <Loader2 className="w-8 h-8 mx-auto animate-spin text-primary" />
+                  <p className="text-sm text-muted-foreground">
+                    正在上传第 {batchProgress.current} / {batchProgress.total} 份...
+                  </p>
+                  <div className="w-full max-w-xs mx-auto bg-secondary rounded-full h-2 overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-all duration-300 rounded-full"
+                      style={{ width: `${batchProgress.total > 0 ? (batchProgress.current / batchProgress.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">点击或拖拽文件到此处，支持同时选择多份图纸</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">支持 PDF、DWG、DXF、图片格式 · 自动识别名称编号及专业分类</p>
+                </div>
+              )}
+            </div>
+
+            {/* 统一施工单位 */}
+            {batchFiles.length > 0 && !saving && (
+              <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                <label className="text-sm font-medium text-foreground whitespace-nowrap">统一施工单位:</label>
                 <Select
-                  value={newDrawing.specialty}
-                  onChange={(e) => setNewDrawing({ ...newDrawing, specialty: e.target.value })}
-                  options={DRAWING_SPECIALTIES.map((s) => ({ value: s, label: s }))}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1.5">施工单位</label>
-                <Select
-                  value={newDrawing.constructionUnit}
-                  onChange={(e) => setNewDrawing({ ...newDrawing, constructionUnit: e.target.value })}
+                  value={batchUnit}
+                  onChange={(e) => setBatchUnit(e.target.value)}
                   options={CONSTRUCTION_UNITS.map((u) => ({ value: u, label: u }))}
                 />
               </div>
-            </div>
-            <div className="flex gap-3 mt-4">
-              <Button onClick={handleUpload} disabled={saving}>
-                {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                确认上传
+            )}
+
+            {/* 批量文件列表 */}
+            {batchFiles.length > 0 && (
+              <div className="border rounded-lg overflow-hidden">
+                <div className="bg-secondary/50 px-4 py-2 grid grid-cols-12 gap-2 text-xs font-medium text-muted-foreground">
+                  <div className="col-span-1">状态</div>
+                  <div className="col-span-3">文件名</div>
+                  <div className="col-span-3">图纸名称</div>
+                  <div className="col-span-2">图纸编号</div>
+                  <div className="col-span-2">专业分类</div>
+                  <div className="col-span-1">操作</div>
+                </div>
+                <div className="max-h-64 overflow-y-auto divide-y divide-border">
+                  {batchFiles.map((item, idx) => (
+                    <div key={idx} className={`px-4 py-2 grid grid-cols-12 gap-2 items-center text-sm ${
+                      item.status === "done" ? "bg-green-50 dark:bg-green-950/20" :
+                      item.status === "error" ? "bg-red-50 dark:bg-red-950/20" :
+                      item.status === "uploading" ? "bg-blue-50 dark:bg-blue-950/20" : ""
+                    }`}>
+                      <div className="col-span-1">
+                        {item.status === "pending" && <span className="w-2 h-2 rounded-full bg-muted-foreground inline-block" />}
+                        {item.status === "uploading" && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
+                        {item.status === "done" && <Check className="w-4 h-4 text-green-600" />}
+                        {item.status === "error" && <X className="w-4 h-4 text-destructive" />}
+                      </div>
+                      <div className="col-span-3 truncate text-xs text-muted-foreground" title={item.file.name}>
+                        {item.file.name}
+                        <span className="ml-1 text-[10px]">({(item.file.size / 1024 / 1024).toFixed(1)}MB)</span>
+                      </div>
+                      <div className="col-span-3">
+                        {item.status === "pending" ? (
+                          <Input
+                            value={item.name}
+                            onChange={(e) => setBatchFiles((prev) => prev.map((f, i) => i === idx ? { ...f, name: e.target.value } : f))}
+                            className="h-7 text-xs"
+                          />
+                        ) : (
+                          <span className="text-xs">{item.name}</span>
+                        )}
+                      </div>
+                      <div className="col-span-2">
+                        {item.status === "pending" ? (
+                          <Input
+                            value={item.code}
+                            onChange={(e) => setBatchFiles((prev) => prev.map((f, i) => i === idx ? { ...f, code: e.target.value } : f))}
+                            className="h-7 text-xs"
+                          />
+                        ) : (
+                          <span className="text-xs">{item.code}</span>
+                        )}
+                      </div>
+                      <div className="col-span-2">
+                        {item.status === "pending" ? (
+                          <select
+                            value={item.specialty}
+                            onChange={(e) => setBatchFiles((prev) => prev.map((f, i) => i === idx ? { ...f, specialty: e.target.value } : f))}
+                            className="w-full h-7 text-xs border rounded px-1 bg-background text-foreground"
+                          >
+                            {DRAWING_SPECIALTIES.map((s) => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <Badge variant="info" className="text-[10px]">{item.specialty}</Badge>
+                        )}
+                      </div>
+                      <div className="col-span-1">
+                        {item.status === "pending" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => setBatchFiles((prev) => prev.filter((_, i) => i !== idx))}
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 操作按钮 */}
+            <div className="flex gap-3">
+              <Button onClick={handleBatchUpload} disabled={saving || batchFiles.filter((f) => f.status === "pending").length === 0}>
+                {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
+                {saving ? `上传中 ${batchProgress.current}/${batchProgress.total}` : `确认上传 (${batchFiles.filter((f) => f.status === "pending").length})`}
               </Button>
-              <Button variant="outline" onClick={() => setShowUpload(false)}>取消</Button>
+              <Button variant="outline" onClick={() => { setShowUpload(false); setBatchFiles([]) }}>取消</Button>
+              {batchFiles.length > 0 && !saving && (
+                <Button variant="ghost" className="text-destructive" onClick={() => setBatchFiles([])}>
+                  清空列表
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
